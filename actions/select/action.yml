@@ -1,0 +1,113 @@
+name: "issue-loop select"
+description: "Pick eligible queued issues, set loop:in-progress, emit a matrix. No LLM."
+inputs:
+  label:
+    description: "Queue label."
+    required: true
+  max_issues_per_run:
+    description: "Cap on issues selected this run."
+    required: true
+  max_attempts:
+    description: "Skip issues already tried this many times."
+    required: true
+  issue:
+    description: "Optional single issue number override."
+    required: false
+    default: ""
+  dry_run:
+    description: "If 'true', decide but mutate nothing."
+    required: false
+    default: "false"
+  github_token:
+    description: "Token with issues:write."
+    required: true
+outputs:
+  matrix:
+    description: "JSON array of selected issue numbers."
+    value: ${{ steps.run.outputs.matrix }}
+  count:
+    description: "Number of selected issues."
+    value: ${{ steps.run.outputs.count }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        QUEUE: ${{ inputs.label }}
+        MAX_ISSUES: ${{ inputs.max_issues_per_run }}
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        SINGLE: ${{ inputs.issue }}
+        DRY: ${{ inputs.dry_run }}
+        MARK: "issue-loop:run"
+      run: |
+        set -euo pipefail
+
+        ensure_label() {
+          gh label create "$1" --color "$2" --description "$3" --force >/dev/null 2>&1 || true
+        }
+        ensure_label "$QUEUE"           "ededed" "issue-loop queue (opt-in)"
+        ensure_label "loop:in-progress" "fbca04" "issue-loop is working this issue"
+        ensure_label "loop:pr-open"     "0e8a16" "issue-loop opened a PR"
+        ensure_label "loop:needs-human" "d93f0b" "issue-loop is blocked; needs guidance"
+        ensure_label "loop:error"       "b60205" "issue-loop run errored"
+
+        if [ -n "$SINGLE" ]; then
+          candidates="$SINGLE"
+        else
+          candidates="$(gh issue list --label "$QUEUE" --state open --limit 100 \
+            --json number --jq '.[].number')"
+        fi
+
+        selected=()
+        for n in $candidates; do
+          [ -n "$n" ] || continue
+          data="$(gh issue view "$n" --json number,state,labels,comments)"
+          [ "$(jq -r '.state' <<<"$data")" = "OPEN" ] || { echo "skip #$n: not open"; continue; }
+
+          labels="$(jq -r '.labels[].name' <<<"$data")"
+          has() { grep -qx "$1" <<<"$labels"; }
+
+          if [ -z "$SINGLE" ]; then has "$QUEUE" || { echo "skip #$n: no queue label"; continue; }; fi
+          if has "loop:pr-open"; then echo "skip #$n: pr-open"; continue; fi
+
+          attempts="$(jq -r --arg m "$MARK" \
+            '[.comments[] | select(.body | contains($m))] | length' <<<"$data")"
+          if [ "$attempts" -ge "$MAX_ATTEMPTS" ]; then
+            echo "skip #$n: attempts $attempts >= $MAX_ATTEMPTS"; continue
+          fi
+
+          if has "loop:needs-human"; then
+            last_bot="$(jq -r --arg m "$MARK" \
+              '[.comments[] | select(.body|contains($m))] | sort_by(.createdAt) | last | .createdAt // "0"' <<<"$data")"
+            last_human="$(jq -r --arg m "$MARK" \
+              '[.comments[] | select((.body|contains($m)) | not)] | sort_by(.createdAt) | last | .createdAt // "0"' <<<"$data")"
+            if [[ "$last_human" > "$last_bot" ]]; then
+              echo "include #$n: human replied since last run"
+            else
+              echo "skip #$n: needs-human, no new reply"; continue
+            fi
+          fi
+
+          echo "include #$n: eligible (attempts=$attempts)"
+          selected+=("$n")
+          [ "${#selected[@]}" -ge "$MAX_ISSUES" ] && break
+        done
+
+        if [ "${#selected[@]}" -eq 0 ]; then
+          matrix='[]'
+        else
+          matrix="$(printf '%s\n' "${selected[@]}" | jq -R 'tonumber' | jq -s -c '.')"
+          if [ "$DRY" != "true" ]; then
+            for n in "${selected[@]}"; do
+              gh issue edit "$n" --add-label "loop:in-progress" >/dev/null
+            done
+          fi
+        fi
+        count="$(jq 'length' <<<"$matrix")"
+        echo "Selected $count issue(s): $matrix"
+        {
+          echo "matrix=$matrix"
+          echo "count=$count"
+        } >> "$GITHUB_OUTPUT"

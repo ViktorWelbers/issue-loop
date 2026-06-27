@@ -1,0 +1,37 @@
+name: "issue-loop report"
+description: "Write a run summary and clear any stale loop:in-progress labels."
+inputs:
+  matrix:
+    description: "JSON array of issue numbers that were selected."
+    required: false
+    default: "[]"
+  github_token:
+    description: "Token with issues:write."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        MATRIX: ${{ inputs.matrix }}
+      run: |
+        set -euo pipefail
+
+        # Safety net: a cancelled/timed-out solve job can leave loop:in-progress behind.
+        stale="$(gh issue list --label "loop:in-progress" --state open --json number \
+          --jq '.[].number' || true)"
+        for n in $stale; do
+          gh issue edit "$n" --remove-label "loop:in-progress" >/dev/null 2>&1 || true
+          echo "cleared stale loop:in-progress on #$n"
+        done
+
+        {
+          echo "### issue-loop run"
+          echo ""
+          echo "Selected issues: \`${MATRIX}\`"
+          if [ -n "$stale" ]; then
+            echo ""
+            echo "Cleared stale \`loop:in-progress\` on: $stale"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

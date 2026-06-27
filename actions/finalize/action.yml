@@ -1,0 +1,57 @@
+name: "issue-loop finalize"
+description: "Reconcile labels + post a fallback run-comment after a solve attempt."
+inputs:
+  issue:
+    description: "Issue number."
+    required: true
+  maintainer:
+    description: "Handle to @-mention on error."
+    required: false
+    default: ""
+  claude_outcome:
+    description: "outcome of the claude step (success/failure/cancelled/skipped)."
+    required: true
+  github_token:
+    description: "Token with issues:write, pull-requests:read."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        ISSUE: ${{ inputs.issue }}
+        MAINTAINER: ${{ inputs.maintainer }}
+        CLAUDE_OUTCOME: ${{ inputs.claude_outcome }}
+        MARK: "issue-loop:run"
+      run: |
+        set -euo pipefail
+
+        # Always release the claim.
+        gh issue edit "$ISSUE" --remove-label "loop:in-progress" >/dev/null 2>&1 || true
+
+        # Primary signal: did a PR for this issue's branch get opened?
+        pr="$(gh pr list --state open --json number,headRefName \
+          --jq "[.[] | select(.headRefName | startswith(\"loop/issue-$ISSUE\"))][0].number // \"\"")"
+
+        # Secondary signal: the agent's own outcome marker in its last run-comment.
+        last="$(gh issue view "$ISSUE" --json comments \
+          --jq "[.comments[] | select(.body | contains(\"$MARK\"))] | sort_by(.createdAt) | last | .body // \"\"")"
+
+        if [ -n "$pr" ]; then
+          gh issue edit "$ISSUE" --add-label "loop:pr-open" >/dev/null
+          echo "Issue #$ISSUE -> loop:pr-open (PR #$pr)"
+        elif printf '%s' "$last" | grep -q "outcome=blocked"; then
+          gh issue edit "$ISSUE" --add-label "loop:needs-human" >/dev/null
+          echo "Issue #$ISSUE -> loop:needs-human"
+        else
+          # Crash, no PR, no recognizable result -> error. The marker keeps this run
+          # counted as an attempt so the issue can't loop on errors forever.
+          gh issue edit "$ISSUE" --add-label "loop:error" >/dev/null
+          mention="${MAINTAINER:-A maintainer}"
+          gh issue comment "$ISSUE" --body "$(printf '%s\n%s\n\n%s' \
+            "🤖 **issue-loop** run did not complete cleanly (engine outcome: \`$CLAUDE_OUTCOME\`)." \
+            "No structured result was posted, so this issue is marked \`loop:error\`. $mention please check the workflow logs." \
+            "<!-- issue-loop:run outcome=error -->")"
+          echo "Issue #$ISSUE -> loop:error"
+        fi

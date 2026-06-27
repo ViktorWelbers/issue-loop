@@ -1,0 +1,50 @@
+name: "issue-loop render-prompt"
+description: "Render the per-issue policy prompt for the Claude run."
+inputs:
+  issue:
+    description: "Issue number."
+    required: true
+  maintainer:
+    description: "Handle to @-mention when blocked."
+    required: false
+    default: ""
+  verify_command:
+    description: "Exact verify command, or empty to infer."
+    required: false
+    default: ""
+  github_token:
+    description: "Token with issues:read."
+    required: true
+outputs:
+  prompt:
+    description: "The rendered policy prompt."
+    value: ${{ steps.render.outputs.prompt }}
+runs:
+  using: composite
+  steps:
+    - id: render
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        LOOP_ISSUE: ${{ inputs.issue }}
+        LOOP_MAINTAINER: ${{ inputs.maintainer }}
+        LOOP_VERIFY: ${{ inputs.verify_command }}
+      run: |
+        set -euo pipefail
+        branch="loop/issue-${LOOP_ISSUE}"
+        verify="${LOOP_VERIFY:-(none provided — infer from the repository)}"
+        maintainer="${LOOP_MAINTAINER:-the maintainers}"
+
+        tmpl="${{ github.action_path }}/policy.md"
+        out="$(cat "$tmpl")"
+        out="${out//'{{ISSUE}}'/$LOOP_ISSUE}"
+        out="${out//'{{BRANCH}}'/$branch}"
+        out="${out//'{{MAINTAINER}}'/$maintainer}"
+        out="${out//'{{VERIFY}}'/$verify}"
+        out="${out//'{{REPO}}'/$GITHUB_REPOSITORY}"
+
+        {
+          echo "prompt<<__ISSUE_LOOP_EOF__"
+          echo "$out"
+          echo "__ISSUE_LOOP_EOF__"
+        } >> "$GITHUB_OUTPUT"

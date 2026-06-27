@@ -1,0 +1,44 @@
+# Copy this into YOUR repo at .github/workflows/issue-loop.yml
+#
+# Then:
+#   1. Add a repo secret: ANTHROPIC_API_KEY  (or CLAUDE_CODE_OAUTH_TOKEN)
+#   2. Label an issue `loop` to opt it into the queue.
+#   3. Wait for the schedule, or run it manually from the Actions tab.
+
+name: issue-loop
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # daily at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Single issue number to target (optional)."
+        required: false
+      dry_run:
+        description: "Select only, mutate nothing."
+        type: boolean
+        default: false
+
+# Grant the default GITHUB_TOKEN what the loop needs. No GitHub App required.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  loop:
+    uses: ViktorWelbers/issue-loop/.github/workflows/loop.yml@v1
+    secrets:
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}  # use this instead for a subscription
+    with:
+      label: loop
+      max_issues_per_run: 1
+      max_attempts: 3
+      maintainer: "@ViktorWelbers" # who gets pinged when an issue is blocked
+      # model: claude-opus-4-8       # optional; omit to use the action default
+      max_turns: 40
+      # verify_command: "npm test"   # optional; omit to let the agent infer it
+      issue: ${{ github.event.inputs.issue }}
+      dry_run: ${{ github.event.inputs.dry_run == 'true' }}

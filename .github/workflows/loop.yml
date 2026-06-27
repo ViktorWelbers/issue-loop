@@ -1,0 +1,137 @@
+name: issue-loop
+
+# Reusable workflow: an autonomous, label-driven issue-queue orchestrator that
+# delegates each per-issue solve to the official anthropics/claude-code-action.
+#
+# Adopters call this from their own repo (see examples/issue-loop.yml):
+#   uses: ViktorWelbers/issue-loop/.github/workflows/loop.yml@v1
+
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: "Queue label humans add to opt an issue in."
+        type: string
+        default: "loop"
+      max_issues_per_run:
+        description: "How many eligible issues to work in one run."
+        type: number
+        default: 1
+      max_attempts:
+        description: "Give up (force loop:needs-human) after this many runs on an issue."
+        type: number
+        default: 3
+      maintainer:
+        description: "Who to @-mention when an issue is blocked, e.g. '@octocat'."
+        type: string
+        default: ""
+      model:
+        description: "Optional Claude model id (else the action default)."
+        type: string
+        default: ""
+      max_turns:
+        description: "Per-issue agent turn budget (cost cap)."
+        type: number
+        default: 40
+      verify_command:
+        description: "Optional exact test/verify command; else inferred from the repo."
+        type: string
+        default: ""
+      issue:
+        description: "Optional single issue number to target (overrides the queue)."
+        type: string
+        default: ""
+      runs_on:
+        description: "Runner label(s)."
+        type: string
+        default: "ubuntu-latest"
+      dry_run:
+        description: "Select-only: print decisions, mutate nothing, run no agent."
+        type: boolean
+        default: false
+    secrets:
+      anthropic_api_key:
+        required: false
+      claude_code_oauth_token:
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: issue-loop-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  select:
+    name: select
+    runs-on: ${{ inputs.runs_on }}
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - id: select
+        uses: ViktorWelbers/issue-loop/actions/select@main
+        with:
+          label: ${{ inputs.label }}
+          max_issues_per_run: ${{ inputs.max_issues_per_run }}
+          max_attempts: ${{ inputs.max_attempts }}
+          issue: ${{ inputs.issue }}
+          dry_run: ${{ inputs.dry_run }}
+          github_token: ${{ github.token }}
+
+  solve:
+    name: solve
+    needs: select
+    if: ${{ inputs.dry_run == false && needs.select.outputs.count != '0' }}
+    runs-on: ${{ inputs.runs_on }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        issue: ${{ fromJson(needs.select.outputs.matrix) }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: render
+        uses: ViktorWelbers/issue-loop/actions/render-prompt@main
+        with:
+          issue: ${{ matrix.issue }}
+          maintainer: ${{ inputs.maintainer }}
+          verify_command: ${{ inputs.verify_command }}
+          github_token: ${{ github.token }}
+
+      - id: claude
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          prompt: ${{ steps.render.outputs.prompt }}
+          claude_args: --max-turns ${{ inputs.max_turns }} ${{ inputs.model && format('--model {0}', inputs.model) || '' }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          github_token: ${{ github.token }}
+          branch_prefix: "loop/"
+
+      - if: always()
+        uses: ViktorWelbers/issue-loop/actions/finalize@main
+        with:
+          issue: ${{ matrix.issue }}
+          maintainer: ${{ inputs.maintainer }}
+          claude_outcome: ${{ steps.claude.outcome }}
+          github_token: ${{ github.token }}
+
+  report:
+    name: report
+    needs: [select, solve]
+    if: ${{ always() }}
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      - uses: ViktorWelbers/issue-loop/actions/report@main
+        with:
+          matrix: ${{ needs.select.outputs.matrix }}
+          github_token: ${{ github.token }}
