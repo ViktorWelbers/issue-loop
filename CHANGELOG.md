@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.0 — 2026-06-28
 
 - Initial scaffold of `issue-loop`: a reusable GitHub Actions workflow that works a
   `loop`-labeled issue queue by delegating each per-issue solve to

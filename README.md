@@ -22,10 +22,14 @@ It is distributed as a **reusable workflow**, so adopting it is one job in one f
 
 1. **Add a secret** to your repo: `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`
    from `claude setup-token` if you're on a Claude subscription).
-2. **Add the workflow** — copy [`examples/issue-loop.yml`](examples/issue-loop.yml) to
+2. **Let Actions open PRs** — in **Settings → Actions → General → Workflow
+   permissions**, enable **"Allow GitHub Actions to create and approve pull
+   requests"**. Without this the agent can push its branch but `gh pr create` is
+   blocked, so it escalates to `loop:needs-human` instead of opening a PR.
+3. **Add the workflow** — copy [`examples/issue-loop.yml`](examples/issue-loop.yml) to
    `.github/workflows/issue-loop.yml` in your repo and set `maintainer:` to your handle.
-3. **Queue an issue** — add the `loop` label to any open issue.
-4. **Run it** — wait for the daily schedule, or trigger it from the **Actions** tab
+4. **Queue an issue** — add the `loop` label to any open issue.
+5. **Run it** — wait for the daily schedule, or trigger it from the **Actions** tab
    (use the `dry_run` input first to preview what it would pick up).
 
 ## How it works
