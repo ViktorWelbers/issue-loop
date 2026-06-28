@@ -73,7 +73,7 @@ jobs:
       count: ${{ steps.select.outputs.count }}
     steps:
       - id: select
-        uses: ViktorWelbers/issue-loop/actions/select@main
+        uses: ViktorWelbers/issue-loop/actions/select@v1
         with:
           label: ${{ inputs.label }}
           max_issues_per_run: ${{ inputs.max_issues_per_run }}
@@ -99,7 +99,7 @@ jobs:
           fetch-depth: 0
 
       - id: render
-        uses: ViktorWelbers/issue-loop/actions/render-prompt@main
+        uses: ViktorWelbers/issue-loop/actions/render-prompt@v1
         with:
           issue: ${{ matrix.issue }}
           maintainer: ${{ inputs.maintainer }}
@@ -120,7 +120,7 @@ jobs:
           branch_prefix: "loop/"
 
       - if: always()
-        uses: ViktorWelbers/issue-loop/actions/finalize@main
+        uses: ViktorWelbers/issue-loop/actions/finalize@v1
         with:
           issue: ${{ matrix.issue }}
           maintainer: ${{ inputs.maintainer }}
@@ -133,7 +133,7 @@ jobs:
     if: ${{ always() }}
     runs-on: ${{ inputs.runs_on }}
     steps:
-      - uses: ViktorWelbers/issue-loop/actions/report@main
+      - uses: ViktorWelbers/issue-loop/actions/report@v1
         with:
           matrix: ${{ needs.select.outputs.matrix }}
           github_token: ${{ github.token }}
