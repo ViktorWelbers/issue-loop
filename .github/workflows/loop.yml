@@ -111,7 +111,9 @@ jobs:
         continue-on-error: true
         with:
           prompt: ${{ steps.render.outputs.prompt }}
-          claude_args: --max-turns ${{ inputs.max_turns }} ${{ inputs.model && format('--model {0}', inputs.model) || '' }}
+          # The agent must run git/gh/test commands and edit files; the action's
+          # default tool set denies Bash, so grant the tools the policy needs.
+          claude_args: --allowedTools Bash,Edit,Write,Read,Glob,Grep,MultiEdit --max-turns ${{ inputs.max_turns }} ${{ inputs.model && format('--model {0}', inputs.model) || '' }}
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
           claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
           github_token: ${{ github.token }}
