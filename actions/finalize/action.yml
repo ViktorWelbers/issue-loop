@@ -40,9 +40,11 @@ runs:
           --jq "[.comments[] | select(.body | contains(\"$MARK\"))] | sort_by(.createdAt) | last | .body // \"\"")"
 
         if [ -n "$pr" ]; then
+          gh issue edit "$ISSUE" --remove-label "loop:needs-human" --remove-label "loop:error" >/dev/null 2>&1 || true
           gh issue edit "$ISSUE" --add-label "loop:pr-open" >/dev/null
           echo "Issue #$ISSUE -> loop:pr-open (PR #$pr)"
         elif printf '%s' "$last" | grep -q "outcome=blocked"; then
+          gh issue edit "$ISSUE" --remove-label "loop:error" >/dev/null 2>&1 || true
           gh issue edit "$ISSUE" --add-label "loop:needs-human" >/dev/null
           echo "Issue #$ISSUE -> loop:needs-human"
         else
